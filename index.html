@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Aerochrome Simulator iPhone-Ready</title>
+<title>Aerochrome Simulator (Optimized)</title>
 <style>
   body { font-family: system-ui, sans-serif; padding: 12px; max-width: 900px; margin:auto; }
   canvas { max-width:100%; border:1px solid #ccc; margin-top:10px; }
@@ -27,7 +27,6 @@
 <script>
 let irImg=null, visImg=null;
 const canvas=document.getElementById('canvas');
-const ctx=canvas.getContext('2d');
 const status=document.getElementById('status');
 const redBoostSlider=document.getElementById('redBoost');
 
@@ -57,7 +56,7 @@ waitForCV(()=>{
     if(!irImg || !visImg){ status.textContent="Load both images first"; return; }
     status.textContent="Processing...";
 
-    const maxWidth=400;
+    const maxWidth=800;
     function resizeCanvas(img){
       const scale=Math.min(1, maxWidth/img.width);
       const w=Math.round(img.width*scale);
@@ -79,33 +78,47 @@ waitForCV(()=>{
     cv.cvtColor(irMat, irGray, cv.COLOR_RGBA2GRAY);
     cv.cvtColor(visMat, visGray, cv.COLOR_RGBA2GRAY);
 
-    // AKAZE feature detection (more robust than ORB)
+    // AKAZE feature detection
     let detector=new cv.AKAZE();
     let kp1=new cv.KeyPointVector(), kp2=new cv.KeyPointVector();
     let des1=new cv.Mat(), des2=new cv.Mat();
     detector.detectAndCompute(irGray, new cv.Mat(), kp1, des1);
     detector.detectAndCompute(visGray, new cv.Mat(), kp2, des2);
 
+    // Limit keypoints to 300
+    if (kp1.size() > 300) { kp1.resize(300); des1 = des1.rowRange(0,300); }
+    if (kp2.size() > 300) { kp2.resize(300); des2 = des2.rowRange(0,300); }
+
     let bf=new cv.BFMatcher(cv.NORM_HAMMING,true);
     let matches=new cv.DMatchVector();
     bf.match(des1, des2, matches);
 
-    if(matches.size()<4){ status.textContent="Not enough matches to align"; return; }
-
-    // Extract points
-    let pts1=[], pts2=[];
-    for(let i=0;i<matches.size();i++){
-      let m=matches.get(i);
-      pts1.push(kp1.get(m.queryIdx).pt);
-      pts2.push(kp2.get(m.trainIdx).pt);
-    }
-    let srcPts=cv.matFromArray(pts1.length,1,cv.CV_32FC2,[].concat(...pts1.map(p=>[p.x,p.y])));
-    let dstPts=cv.matFromArray(pts2.length,1,cv.CV_32FC2,[].concat(...pts2.map(p=>[p.x,p.y])));
-
-    let H=cv.findHomography(srcPts,dstPts,cv.RANSAC);
-
     let alignedIR=new cv.Mat();
-    cv.warpPerspective(irMat, alignedIR, H, new cv.Size(visMat.cols, visMat.rows));
+
+    if(matches.size()<4){
+        status.textContent="Not enough matches, skipping alignment.";
+        alignedIR = irMat.clone();
+    } else {
+        // Extract points
+        let pts1=[], pts2=[];
+        for(let i=0;i<matches.size();i++){
+          let m=matches.get(i);
+          pts1.push(kp1.get(m.queryIdx).pt);
+          pts2.push(kp2.get(m.trainIdx).pt);
+        }
+        let srcPts=cv.matFromArray(pts1.length,1,cv.CV_32FC2,[].concat(...pts1.map(p=>[p.x,p.y])));
+        let dstPts=cv.matFromArray(pts2.length,1,cv.CV_32FC2,[].concat(...pts2.map(p=>[p.x,p.y])));
+
+        let H=cv.findHomography(srcPts,dstPts,cv.RANSAC);
+
+        if (H.empty()){
+            status.textContent="Homography failed, skipping alignment.";
+            alignedIR = irMat.clone();
+        } else {
+            cv.warpPerspective(irMat, alignedIR, H, new cv.Size(visMat.cols, visMat.rows));
+        }
+        srcPts.delete(); dstPts.delete(); H.delete();
+    }
 
     // Split visible channels
     let visChannels=new cv.MatVector();
@@ -142,7 +155,6 @@ waitForCV(()=>{
     irMat.delete(); visMat.delete();
     irGray.delete(); visGray.delete();
     kp1.delete(); kp2.delete(); des1.delete(); des2.delete(); matches.delete(); bf.delete(); detector.delete();
-    srcPts.delete(); dstPts.delete(); H.delete();
     alignedIR.delete(); irGrayAligned.delete();
     visChannels.delete(); visR.delete(); visG.delete(); outChannels.delete();
   };
