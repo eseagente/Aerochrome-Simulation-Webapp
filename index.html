@@ -12,7 +12,7 @@
   </style>
 </head>
 <body>
-  <h2>Aerochrome Simulator 5</h2>
+  <h2>Aerochrome Simulator 6</h2>
 
   <label>IR Image: <input type="file" id="irInput" accept="image/*"></label>
   <label>Normal Image: <input type="file" id="visInput" accept="image/*"></label>
@@ -25,6 +25,8 @@
 
   <script>
     let irImg = null, visImg = null;
+    let alignedIR = null; // cache aligned IR for slider updates
+    let visMatGlobal = null;
 
     function updateStatus(msg) {
       document.getElementById('status').textContent = msg;
@@ -45,6 +47,38 @@
       let ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       return cv.imread(canvas);
+    }
+
+    function mergeAndDisplay(scale = 1.0) {
+      if (!alignedIR || !visMatGlobal) return;
+
+      let visChannels = new cv.MatVector();
+      cv.split(visMatGlobal, visChannels);
+
+      let irChannels = new cv.MatVector();
+      cv.split(alignedIR, irChannels);
+
+      let irRed = new cv.Mat();
+      irChannels.get(0).convertTo(irRed, -1, scale, 0); // faster scaling
+
+      let outChannels = new cv.MatVector();
+      outChannels.push_back(irRed);
+      outChannels.push_back(visChannels.get(0));
+      outChannels.push_back(visChannels.get(1));
+
+      let merged = new cv.Mat();
+      cv.merge(outChannels, merged);
+
+      // Optional: downscale for display if too big
+      let displayMat = new cv.Mat();
+      let maxDisplay = 800;
+      let scaleDisplay = Math.min(1, maxDisplay / merged.cols);
+      cv.resize(merged, displayMat, new cv.Size(Math.round(merged.cols * scaleDisplay), Math.round(merged.rows * scaleDisplay)));
+
+      cv.imshow("output", displayMat);
+
+      // cleanup
+      visChannels.delete(); irChannels.delete(); irRed.delete(); outChannels.delete(); merged.delete(); displayMat.delete();
     }
 
     function process() {
@@ -82,7 +116,6 @@
         if (m.distance < 0.75 * n.distance) good.push(m);
       }
 
-      let alignedIR = new cv.Mat();
       if (good.length < 4) {
         updateStatus("Not enough matches, skipping alignment.");
         alignedIR = irMat.clone();
@@ -102,45 +135,27 @@
           alignedIR = irMat.clone();
         } else {
           updateStatus("Warping IR image…");
+          alignedIR = new cv.Mat();
           cv.warpPerspective(irMat, alignedIR, H, new cv.Size(visMat.cols, visMat.rows));
         }
 
         src.delete(); dst.delete(); H.delete();
       }
 
+      // cache visMat for slider updates
+      visMatGlobal = visMat.clone();
+
+      // initial display
+      let scale = document.getElementById('irSlider').value / 100;
       updateStatus("Merging channels…");
-
-      let visChannels = new cv.MatVector();
-      cv.split(visMat, visChannels);
-      let irChannels = new cv.MatVector();
-      cv.split(alignedIR, irChannels);
-
-      let merged = new cv.Mat();
-      let outChannels = new cv.MatVector();
-
-      // Apply IR intensity from slider
-      let irSlider = document.getElementById('irSlider').value;
-      let scale = irSlider / 100;
-      let irRed = new cv.Mat();
-      cv.multiply(irChannels.get(0), new cv.Scalar(scale), irRed);
-
-      outChannels.push_back(irRed);           // IR → Red
-      outChannels.push_back(visChannels.get(0)); // Red → Green
-      outChannels.push_back(visChannels.get(1)); // Green → Blue
-      cv.merge(outChannels, merged);
-
-      cv.imshow("output", merged);
+      mergeAndDisplay(scale);
 
       updateStatus("Done!");
 
       // cleanup
-      irMat.delete(); visMat.delete();
-      irGray.delete(); visGray.delete();
-      kp1.delete(); kp2.delete();
-      des1.delete(); des2.delete();
+      irMat.delete(); irGray.delete(); visGray.delete();
+      kp1.delete(); kp2.delete(); des1.delete(); des2.delete();
       detector.delete(); bf.delete(); matches.delete();
-      visChannels.delete(); irChannels.delete(); outChannels.delete();
-      merged.delete(); alignedIR.delete(); irRed.delete();
     }
 
     function waitForCV(callback) {
@@ -161,6 +176,8 @@
 
     document.getElementById('irSlider').addEventListener('input', e => {
       document.getElementById('irValue').textContent = e.target.value + "%";
+      let scale = e.target.value / 100;
+      mergeAndDisplay(scale);
     });
   </script>
 </body>
