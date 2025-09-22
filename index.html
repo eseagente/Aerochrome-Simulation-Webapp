@@ -8,12 +8,17 @@
     body { font-family: sans-serif; margin: 20px; }
     #status { margin: 10px 0; font-weight: bold; }
     canvas { margin-top: 10px; border: 1px solid #ccc; max-width: 100%; }
+    label { display: block; margin-top: 10px; }
   </style>
 </head>
 <body>
-  <h2>Aerochrome Simulator 4</h2>
-  <label>IR Image: <input type="file" id="irInput" accept="image/*"></label><br><br>
-  <label>Normal Image: <input type="file" id="visInput" accept="image/*"></label><br><br>
+  <h2>Aerochrome Simulator 5</h2>
+
+  <label>IR Image: <input type="file" id="irInput" accept="image/*"></label>
+  <label>Normal Image: <input type="file" id="visInput" accept="image/*"></label>
+
+  <label>IR intensity (red channel): <input type="range" id="irSlider" min="0" max="200" value="100"> <span id="irValue">100%</span></label>
+
   <button id="processBtn">Process</button>
   <div id="status">Waiting for input…</div>
   <canvas id="output"></canvas>
@@ -32,7 +37,7 @@
       img.src = URL.createObjectURL(file);
     }
 
-    function resizeImage(img, maxW = 500) {
+    function resizeImage(img, maxW = 1000) {
       let scale = Math.min(1, maxW / img.width);
       let canvas = document.createElement('canvas');
       canvas.width = img.width * scale;
@@ -50,8 +55,8 @@
 
       updateStatus("Starting…");
 
-      let irMat = resizeImage(irImg, 500);
-      let visMat = resizeImage(visImg, 500);
+      let irMat = resizeImage(irImg, 1000);
+      let visMat = resizeImage(visImg, 1000);
 
       updateStatus("Converting to grayscale for alignment…");
       let irGray = new cv.Mat(), visGray = new cv.Mat();
@@ -104,6 +109,7 @@
       }
 
       updateStatus("Merging channels…");
+
       let visChannels = new cv.MatVector();
       cv.split(visMat, visChannels);
       let irChannels = new cv.MatVector();
@@ -111,9 +117,16 @@
 
       let merged = new cv.Mat();
       let outChannels = new cv.MatVector();
-      outChannels.push_back(irChannels.get(0));      // IR → Red
-      outChannels.push_back(visChannels.get(0));     // Red → Green
-      outChannels.push_back(visChannels.get(1));     // Green → Blue
+
+      // Apply IR intensity from slider
+      let irSlider = document.getElementById('irSlider').value;
+      let scale = irSlider / 100;
+      let irRed = new cv.Mat();
+      cv.multiply(irChannels.get(0), new cv.Scalar(scale), irRed);
+
+      outChannels.push_back(irRed);           // IR → Red
+      outChannels.push_back(visChannels.get(0)); // Red → Green
+      outChannels.push_back(visChannels.get(1)); // Green → Blue
       cv.merge(outChannels, merged);
 
       cv.imshow("output", merged);
@@ -127,7 +140,7 @@
       des1.delete(); des2.delete();
       detector.delete(); bf.delete(); matches.delete();
       visChannels.delete(); irChannels.delete(); outChannels.delete();
-      merged.delete(); alignedIR.delete();
+      merged.delete(); alignedIR.delete(); irRed.delete();
     }
 
     function waitForCV(callback) {
@@ -144,6 +157,10 @@
     });
     document.getElementById('visInput').addEventListener('change', e => {
       loadImage(e.target.files[0], img => visImg = img);
+    });
+
+    document.getElementById('irSlider').addEventListener('input', e => {
+      document.getElementById('irValue').textContent = e.target.value + "%";
     });
   </script>
 </body>
