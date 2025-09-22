@@ -12,7 +12,7 @@
   </style>
 </head>
 <body>
-  <h2>Aerochrome Simulator 6</h2>
+  <h2>Aerochrome Simulator 7</h2>
 
   <label>IR Image: <input type="file" id="irInput" accept="image/*"></label>
   <label>Normal Image: <input type="file" id="visInput" accept="image/*"></label>
@@ -39,7 +39,7 @@
       img.src = URL.createObjectURL(file);
     }
 
-    function resizeImage(img, maxW = 1000) {
+    function resizeImage(img, maxW = 1200) {
       let scale = Math.min(1, maxW / img.width);
       let canvas = document.createElement('canvas');
       canvas.width = img.width * scale;
@@ -89,8 +89,8 @@
 
       updateStatus("Starting…");
 
-      let irMat = resizeImage(irImg, 1000);
-      let visMat = resizeImage(visImg, 1000);
+      let irMat = resizeImage(irImg, 1200);
+      let visMat = resizeImage(visImg, 1200);
 
       updateStatus("Converting to grayscale for alignment…");
       let irGray = new cv.Mat(), visGray = new cv.Mat();
