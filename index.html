@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Aerochrome Simulator</title>
+  <title>Aerochrome Simulator (AKAZE)</title>
   <script async src="https://docs.opencv.org/4.x/opencv.js"></script>
   <style>
     body { font-family: sans-serif; margin: 20px; }
@@ -12,7 +12,7 @@
   </style>
 </head>
 <body>
-  <h2>Aerochrome Simulator 7</h2>
+  <h2>Aerochrome Simulator (AKAZE)</h2>
 
   <label>IR Image: <input type="file" id="irInput" accept="image/*"></label>
   <label>Normal Image: <input type="file" id="visInput" accept="image/*"></label>
@@ -25,7 +25,7 @@
 
   <script>
     let irImg = null, visImg = null;
-    let alignedIR = null; // cache aligned IR for slider updates
+    let alignedIR = null; 
     let visMatGlobal = null;
 
     function updateStatus(msg) {
@@ -59,7 +59,7 @@
       cv.split(alignedIR, irChannels);
 
       let irRed = new cv.Mat();
-      irChannels.get(0).convertTo(irRed, -1, scale, 0); // faster scaling
+      irChannels.get(0).convertTo(irRed, -1, scale, 0);
 
       let outChannels = new cv.MatVector();
       outChannels.push_back(irRed);
@@ -69,7 +69,6 @@
       let merged = new cv.Mat();
       cv.merge(outChannels, merged);
 
-      // Optional: downscale for display if too big
       let displayMat = new cv.Mat();
       let maxDisplay = 800;
       let scaleDisplay = Math.min(1, maxDisplay / merged.cols);
@@ -77,7 +76,6 @@
 
       cv.imshow("output", displayMat);
 
-      // cleanup
       visChannels.delete(); irChannels.delete(); irRed.delete(); outChannels.delete(); merged.delete(); displayMat.delete();
     }
 
@@ -97,8 +95,8 @@
       cv.cvtColor(irMat, irGray, cv.COLOR_RGBA2GRAY);
       cv.cvtColor(visMat, visGray, cv.COLOR_RGBA2GRAY);
 
-      updateStatus("Detecting keypoints with ORB…");
-      let detector = new cv.ORB(200);
+      updateStatus("Detecting keypoints with AKAZE…");
+      let detector = new cv.AKAZE();
       let kp1 = new cv.KeyPointVector(), kp2 = new cv.KeyPointVector();
       let des1 = new cv.Mat(), des2 = new cv.Mat();
       detector.detectAndCompute(irGray, new cv.Mat(), kp1, des1);
@@ -142,17 +140,13 @@
         src.delete(); dst.delete(); H.delete();
       }
 
-      // cache visMat for slider updates
       visMatGlobal = visMat.clone();
-
-      // initial display
       let scale = document.getElementById('irSlider').value / 100;
       updateStatus("Merging channels…");
       mergeAndDisplay(scale);
 
       updateStatus("Done!");
 
-      // cleanup
       irMat.delete(); irGray.delete(); visGray.delete();
       kp1.delete(); kp2.delete(); des1.delete(); des2.delete();
       detector.delete(); bf.delete(); matches.delete();
@@ -163,16 +157,9 @@
       else setTimeout(() => waitForCV(callback), 100);
     }
 
-    document.getElementById('processBtn').addEventListener('click', () => {
-      waitForCV(process);
-    });
-
-    document.getElementById('irInput').addEventListener('change', e => {
-      loadImage(e.target.files[0], img => irImg = img);
-    });
-    document.getElementById('visInput').addEventListener('change', e => {
-      loadImage(e.target.files[0], img => visImg = img);
-    });
+    document.getElementById('processBtn').addEventListener('click', () => waitForCV(process));
+    document.getElementById('irInput').addEventListener('change', e => loadImage(e.target.files[0], img => irImg = img));
+    document.getElementById('visInput').addEventListener('change', e => loadImage(e.target.files[0], img => visImg = img));
 
     document.getElementById('irSlider').addEventListener('input', e => {
       document.getElementById('irValue').textContent = e.target.value + "%";
