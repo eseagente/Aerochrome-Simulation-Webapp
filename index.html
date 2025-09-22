@@ -11,7 +11,7 @@
   </style>
 </head>
 <body>
-  <h2>Aerochrome Simulator 2</h2>
+  <h2>Aerochrome Simulator 3</h2>
   <label>IR Image: <input type="file" id="irInput" accept="image/*"></label><br><br>
   <label>Normal Image: <input type="file" id="visInput" accept="image/*"></label><br><br>
   <button id="processBtn">Process</button>
@@ -58,8 +58,8 @@
       cv.cvtColor(irMat, irGray, cv.COLOR_RGBA2GRAY);
       cv.cvtColor(visMat, visGray, cv.COLOR_RGBA2GRAY);
 
-      updateStatus("Detecting keypoints…");
-      let detector = new cv.AKAZE();
+      updateStatus("Detecting keypoints with ORB…");
+      let detector = new cv.ORB();
       let kp1 = new cv.KeyPointVector(), kp2 = new cv.KeyPointVector();
       let des1 = new cv.Mat(), des2 = new cv.Mat();
       detector.detectAndCompute(irGray, new cv.Mat(), kp1, des1);
@@ -70,7 +70,7 @@
       if (kp2.size() > 300) { kp2.resize(300); des2 = des2.rowRange(0,300); }
 
       updateStatus("Matching keypoints…");
-      let bf = new cv.BFMatcher();
+      let bf = new cv.BFMatcher(cv.NORM_HAMMING, false);
       let matches = new cv.DMatchVectorVector();
       bf.knnMatch(des1, des2, matches, 2);
 
@@ -113,7 +113,6 @@
       let irChannels = new cv.MatVector();
       cv.split(alignedIR, irChannels);
 
-      // Aerochrome mapping
       let merged = new cv.Mat();
       let outChannels = new cv.MatVector();
       outChannels.push_back(irChannels.get(0));      // IR → Red
