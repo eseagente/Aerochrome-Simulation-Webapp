@@ -11,7 +11,7 @@
   </style>
 </head>
 <body>
-  <h2>Aerochrome Simulator 3</h2>
+  <h2>Aerochrome Simulator 4</h2>
   <label>IR Image: <input type="file" id="irInput" accept="image/*"></label><br><br>
   <label>Normal Image: <input type="file" id="visInput" accept="image/*"></label><br><br>
   <button id="processBtn">Process</button>
@@ -32,7 +32,7 @@
       img.src = URL.createObjectURL(file);
     }
 
-    function resizeImage(img, maxW = 800) {
+    function resizeImage(img, maxW = 500) {
       let scale = Math.min(1, maxW / img.width);
       let canvas = document.createElement('canvas');
       canvas.width = img.width * scale;
@@ -50,8 +50,8 @@
 
       updateStatus("Starting…");
 
-      let irMat = resizeImage(irImg, 800);
-      let visMat = resizeImage(visImg, 800);
+      let irMat = resizeImage(irImg, 500);
+      let visMat = resizeImage(visImg, 500);
 
       updateStatus("Converting to grayscale for alignment…");
       let irGray = new cv.Mat(), visGray = new cv.Mat();
@@ -59,15 +59,11 @@
       cv.cvtColor(visMat, visGray, cv.COLOR_RGBA2GRAY);
 
       updateStatus("Detecting keypoints with ORB…");
-      let detector = new cv.ORB();
+      let detector = new cv.ORB(200);
       let kp1 = new cv.KeyPointVector(), kp2 = new cv.KeyPointVector();
       let des1 = new cv.Mat(), des2 = new cv.Mat();
       detector.detectAndCompute(irGray, new cv.Mat(), kp1, des1);
       detector.detectAndCompute(visGray, new cv.Mat(), kp2, des2);
-
-      // Cap number of keypoints
-      if (kp1.size() > 300) { kp1.resize(300); des1 = des1.rowRange(0,300); }
-      if (kp2.size() > 300) { kp2.resize(300); des2 = des2.rowRange(0,300); }
 
       updateStatus("Matching keypoints…");
       let bf = new cv.BFMatcher(cv.NORM_HAMMING, false);
@@ -134,13 +130,21 @@
       merged.delete(); alignedIR.delete();
     }
 
+    function waitForCV(callback) {
+      if (cv && cv.Mat) callback();
+      else setTimeout(() => waitForCV(callback), 100);
+    }
+
+    document.getElementById('processBtn').addEventListener('click', () => {
+      waitForCV(process);
+    });
+
     document.getElementById('irInput').addEventListener('change', e => {
       loadImage(e.target.files[0], img => irImg = img);
     });
     document.getElementById('visInput').addEventListener('change', e => {
       loadImage(e.target.files[0], img => visImg = img);
     });
-    document.getElementById('processBtn').addEventListener('click', process);
   </script>
 </body>
 </html>
