@@ -1,0 +1,143 @@
+
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Aerochrome Simulator (iPhone-ready)</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 12px; max-width: 900px; margin:auto; }
+    canvas { max-width:100%; border:1px solid #ccc; margin-top:10px; }
+    label { display:block; margin-top:8px; }
+    #status { margin-top:10px; font-weight:bold; color:green; }
+  </style>
+  <!-- Load OpenCV.js -->
+  <script async src="https://docs.opencv.org/4.x/opencv.js"></script>
+</head>
+<body>
+<h1>Aerochrome Simulator</h1>
+<p>Upload an IR-pass image and a normal image. Auto-align + channel mapping: R=IR, G=Red, B=Green.</p>
+
+<label>IR image: <input id="irFile" type="file" accept="image/*"></label>
+<label>Visible image: <input id="visFile" type="file" accept="image/*"></label>
+<button id="process">Process</button>
+<button id="download">Download PNG</button>
+
+<div id="status">OpenCV loading...</div>
+<canvas id="canvas"></canvas>
+
+<script>
+let irImg=null, visImg=null;
+const canvas=document.getElementById('canvas');
+const ctx=canvas.getContext('2d');
+const status=document.getElementById('status');
+
+function loadImage(file, cb){
+  const url=URL.createObjectURL(file);
+  const img=new Image();
+  img.onload=()=>{ URL.revokeObjectURL(url); cb(img); };
+  img.src=url;
+}
+
+document.getElementById('irFile').onchange=e=>{ if(e.target.files[0]) loadImage(e.target.files[0], img=>{ irImg=img; status.textContent="IR image loaded"; }) }
+document.getElementById('visFile').onchange=e=>{ if(e.target.files[0]) loadImage(e.target.files[0], img=>{ visImg=img; status.textContent="Visible image loaded"; }) }
+
+// Wait for OpenCV to initialize
+cv['onRuntimeInitialized']=()=> {
+  status.textContent="OpenCV ready!";
+  
+  document.getElementById('process').onclick=()=>{
+    if(!irImg || !visImg){ status.textContent="Please load both images"; return; }
+    status.textContent="Processing...";
+
+    // Resize images for performance (~400px width)
+    const maxWidth=400;
+    function resizeCanvas(img){
+      const scale=Math.min(1, maxWidth/img.width);
+      const w=Math.round(img.width*scale);
+      const h=Math.round(img.height*scale);
+      const c=document.createElement('canvas');
+      c.width=w; c.height=h;
+      c.getContext('2d').drawImage(img,0,0,w,h);
+      return c;
+    }
+    const irCanvas=resizeCanvas(irImg);
+    const visCanvas=resizeCanvas(visImg);
+
+    // Read into cv.Mat
+    let irMat=cv.imread(irCanvas);
+    let visMat=cv.imread(visCanvas);
+
+    // Grayscale for alignment
+    let irGray=new cv.Mat();
+    let visGray=new cv.Mat();
+    cv.cvtColor(irMat, irGray, cv.COLOR_RGBA2GRAY);
+    cv.cvtColor(visMat, visGray, cv.COLOR_RGBA2GRAY);
+
+    // ORB feature detection
+    let orb=new cv.ORB();
+    let kp1=new cv.KeyPointVector(), kp2=new cv.KeyPointVector();
+    let des1=new cv.Mat(), des2=new cv.Mat();
+    orb.detectAndCompute(irGray, new cv.Mat(), kp1, des1);
+    orb.detectAndCompute(visGray, new cv.Mat(), kp2, des2);
+
+    let bf=new cv.BFMatcher(cv.NORM_HAMMING,true);
+    let matches=new cv.DMatchVector();
+    bf.match(des1, des2, matches);
+
+    if(matches.size()<4){ status.textContent="Not enough matches to align"; return; }
+
+    // Extract points
+    let pts1=[], pts2=[];
+    for(let i=0;i<matches.size();i++){
+      let m=matches.get(i);
+      pts1.push(kp1.get(m.queryIdx).pt);
+      pts2.push(kp2.get(m.trainIdx).pt);
+    }
+    let srcPts=cv.matFromArray(pts1.length,1,cv.CV_32FC2,[].concat(...pts1.map(p=>[p.x,p.y])));
+    let dstPts=cv.matFromArray(pts2.length,1,cv.CV_32FC2,[].concat(...pts2.map(p=>[p.x,p.y])));
+
+    let H=cv.findHomography(srcPts,dstPts,cv.RANSAC);
+
+    let alignedIR=new cv.Mat();
+    cv.warpPerspective(irMat, alignedIR, H, new cv.Size(visMat.cols, visMat.rows));
+
+    // Split visible channels
+    let visChannels=new cv.MatVector();
+    cv.split(visMat, visChannels);
+    let visR=visChannels.get(0); // R channel
+    let visG=visChannels.get(1); // G channel
+
+    // Convert aligned IR to grayscale
+    let irGrayAligned=new cv.Mat();
+    cv.cvtColor(alignedIR, irGrayAligned, cv.COLOR_RGBA2GRAY);
+
+    // Compose output
+    let out=new cv.Mat();
+    let outChannels=new cv.MatVector();
+    outChannels.push_back(irGrayAligned); // R = IR
+    outChannels.push_back(visR);          // G = visible R
+    outChannels.push_back(visG);          // B = visible G
+    cv.merge(outChannels,out);
+
+    // Show output
+    canvas.width=out.cols; canvas.height=out.rows;
+    cv.imshow(canvas,out);
+    status.textContent="Done!";
+
+    // Cleanup
+    irMat.delete(); visMat.delete();
+    irGray.delete(); visGray.delete();
+    kp1.delete(); kp2.delete(); des1.delete(); des2.delete(); matches.delete(); bf.delete(); orb.delete();
+    srcPts.delete(); dstPts.delete(); H.delete();
+    alignedIR.delete(); irGrayAligned.delete();
+    visChannels.delete(); visR.delete(); visG.delete(); outChannels.delete();
+  }
+};
+
+document.getElementById('download').onclick=()=>{
+  const url=canvas.toDataURL("image/png");
+  const a=document.createElement("a"); a.href=url; a.download="aerochrome.png"; a.click();
+};
+</script>
+</body>
+</html>
