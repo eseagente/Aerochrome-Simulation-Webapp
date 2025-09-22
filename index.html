@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Aerochrome Simulator (AKAZE)</title>
+  <title>Aerochrome Simulator (AKAZE + Base Toggle)</title>
   <script async src="https://docs.opencv.org/4.x/opencv.js"></script>
   <style>
     body { font-family: sans-serif; margin: 20px; }
@@ -12,10 +12,14 @@
   </style>
 </head>
 <body>
-  <h2>Aerochrome Simulator (AKAZE)</h2>
+  <h2>Aerochrome Simulator</h2>
 
   <label>IR Image: <input type="file" id="irInput" accept="image/*"></label>
   <label>Normal Image: <input type="file" id="visInput" accept="image/*"></label>
+
+  <label>
+    <input type="checkbox" id="irAsBase"> Use IR image as base (visible image will be warped)
+  </label>
 
   <label>IR intensity (red channel): <input type="range" id="irSlider" min="0" max="200" value="100"> <span id="irValue">100%</span></label>
 
@@ -25,8 +29,8 @@
 
   <script>
     let irImg = null, visImg = null;
-    let alignedIR = null; 
-    let visMatGlobal = null;
+    let alignedMov = null; 
+    let refMatGlobal = null;
 
     function updateStatus(msg) {
       document.getElementById('status').textContent = msg;
@@ -50,21 +54,26 @@
     }
 
     function mergeAndDisplay(scale = 1.0) {
-      if (!alignedIR || !visMatGlobal) return;
+      if (!alignedMov || !refMatGlobal) return;
 
-      let visChannels = new cv.MatVector();
-      cv.split(visMatGlobal, visChannels);
+      let refChannels = new cv.MatVector();
+      cv.split(refMatGlobal, refChannels);
 
-      let irChannels = new cv.MatVector();
-      cv.split(alignedIR, irChannels);
+      let movChannels = new cv.MatVector();
+      cv.split(alignedMov, movChannels);
 
-      let irRed = new cv.Mat();
-      irChannels.get(0).convertTo(irRed, -1, scale, 0);
+      let irIsBase = document.getElementById('irAsBase').checked;
+
+      let irChannel = irIsBase ? refChannels.get(0) : movChannels.get(0);
+      irChannel.convertTo(irChannel, -1, scale, 0); // apply slider scale
+
+      let greenChannel = irIsBase ? movChannels.get(0) : refChannels.get(0);
+      let blueChannel = irIsBase ? movChannels.get(1) : refChannels.get(1);
 
       let outChannels = new cv.MatVector();
-      outChannels.push_back(irRed);
-      outChannels.push_back(visChannels.get(0));
-      outChannels.push_back(visChannels.get(1));
+      outChannels.push_back(irChannel);
+      outChannels.push_back(greenChannel);
+      outChannels.push_back(blueChannel);
 
       let merged = new cv.Mat();
       cv.merge(outChannels, merged);
@@ -76,7 +85,7 @@
 
       cv.imshow("output", displayMat);
 
-      visChannels.delete(); irChannels.delete(); irRed.delete(); outChannels.delete(); merged.delete(); displayMat.delete();
+      refChannels.delete(); movChannels.delete(); outChannels.delete(); merged.delete(); displayMat.delete();
     }
 
     function process() {
@@ -90,17 +99,23 @@
       let irMat = resizeImage(irImg, 1200);
       let visMat = resizeImage(visImg, 1200);
 
+      let irIsBase = document.getElementById('irAsBase').checked;
+
+      let refMat = irIsBase ? irMat : visMat;
+      let movMat = irIsBase ? visMat : irMat;
+
       updateStatus("Converting to grayscale for alignment…");
-      let irGray = new cv.Mat(), visGray = new cv.Mat();
-      cv.cvtColor(irMat, irGray, cv.COLOR_RGBA2GRAY);
-      cv.cvtColor(visMat, visGray, cv.COLOR_RGBA2GRAY);
+      let refGray = new cv.Mat();
+      let movGray = new cv.Mat();
+      cv.cvtColor(refMat, refGray, cv.COLOR_RGBA2GRAY);
+      cv.cvtColor(movMat, movGray, cv.COLOR_RGBA2GRAY);
 
       updateStatus("Detecting keypoints with AKAZE…");
       let detector = new cv.AKAZE();
       let kp1 = new cv.KeyPointVector(), kp2 = new cv.KeyPointVector();
       let des1 = new cv.Mat(), des2 = new cv.Mat();
-      detector.detectAndCompute(irGray, new cv.Mat(), kp1, des1);
-      detector.detectAndCompute(visGray, new cv.Mat(), kp2, des2);
+      detector.detectAndCompute(movGray, new cv.Mat(), kp1, des1);
+      detector.detectAndCompute(refGray, new cv.Mat(), kp2, des2);
 
       updateStatus("Matching keypoints…");
       let bf = new cv.BFMatcher(cv.NORM_HAMMING, false);
@@ -116,7 +131,7 @@
 
       if (good.length < 4) {
         updateStatus("Not enough matches, skipping alignment.");
-        alignedIR = irMat.clone();
+        alignedMov = movMat.clone();
       } else {
         updateStatus("Computing homography…");
         let srcPts = [], dstPts = [];
@@ -130,24 +145,25 @@
 
         if (H.empty()) {
           updateStatus("Homography failed, skipping alignment.");
-          alignedIR = irMat.clone();
+          alignedMov = movMat.clone();
         } else {
-          updateStatus("Warping IR image…");
-          alignedIR = new cv.Mat();
-          cv.warpPerspective(irMat, alignedIR, H, new cv.Size(visMat.cols, visMat.rows));
+          updateStatus("Warping moving image…");
+          alignedMov = new cv.Mat();
+          cv.warpPerspective(movMat, alignedMov, H, new cv.Size(refMat.cols, refMat.rows));
         }
 
         src.delete(); dst.delete(); H.delete();
       }
 
-      visMatGlobal = visMat.clone();
+      refMatGlobal = refMat.clone();
+
       let scale = document.getElementById('irSlider').value / 100;
       updateStatus("Merging channels…");
       mergeAndDisplay(scale);
 
       updateStatus("Done!");
 
-      irMat.delete(); irGray.delete(); visGray.delete();
+      irMat.delete(); visMat.delete(); refGray.delete(); movGray.delete();
       kp1.delete(); kp2.delete(); des1.delete(); des2.delete();
       detector.delete(); bf.delete(); matches.delete();
     }
@@ -165,6 +181,9 @@
       document.getElementById('irValue').textContent = e.target.value + "%";
       let scale = e.target.value / 100;
       mergeAndDisplay(scale);
+    });
+    document.getElementById('irAsBase').addEventListener('change', () => {
+      if(irImg && visImg) process(); // reprocess if base changes
     });
   </script>
 </body>
